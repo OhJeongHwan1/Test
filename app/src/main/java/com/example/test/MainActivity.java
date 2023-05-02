@@ -3,9 +3,15 @@ package com.example.test;
 import android.os.Bundle;
 
 import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
 import com.google.android.gms.tasks.Tasks;
+import com.google.android.gms.wearable.DataItem;
+import com.google.android.gms.wearable.DataMap;
 import com.google.android.gms.wearable.Node;
+import com.google.android.gms.wearable.PutDataMapRequest;
+import com.google.android.gms.wearable.PutDataRequest;
 import com.google.android.material.snackbar.Snackbar;
 
 import androidx.annotation.NonNull;
@@ -22,6 +28,8 @@ import android.view.MenuItem;
 import android.widget.Button;
 import android.widget.Toast;
 import com.google.android.gms.wearable.Wearable;
+
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 
@@ -34,8 +42,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-     binding = ActivityMainBinding.inflate(getLayoutInflater());
-     setContentView(binding.getRoot());
+        binding = ActivityMainBinding.inflate(getLayoutInflater());
+        setContentView(binding.getRoot());
+
+        checkConnectedNodes();
 
         setSupportActionBar(binding.toolbar);
 
@@ -44,7 +54,6 @@ public class MainActivity extends AppCompatActivity {
         NavigationUI.setupActionBarWithNavController(this, navController, appBarConfiguration);
 
         binding.fab.setOnClickListener(new View.OnClickListener() {
-            @Override
             public void onClick(View view) {
                 Snackbar.make(view, "Replace with your own action", Snackbar.LENGTH_LONG)
                         .setAction("Action", null).show();
@@ -53,23 +62,20 @@ public class MainActivity extends AppCompatActivity {
 
         Button start = (Button) findViewById(R.id.button);
         start.setOnClickListener(new View.OnClickListener(){
-            @Override
             public void onClick(View view){
-                sendMessage();
-            }
+                    sendData("start");
+                }
         });
         Button warning = (Button) findViewById(R.id.button2);
         warning.setOnClickListener(new View.OnClickListener(){
-            @Override
             public void onClick(View view){
-                sendMessage();
-            }
+                    sendData("warning");
+                }
         });
         Button back = (Button) findViewById(R.id.button3);
         back.setOnClickListener(new View.OnClickListener(){
-            @Override
             public void onClick(View view){
-                sendMessage();
+                sendData("back");
             }
         });
 
@@ -102,65 +108,72 @@ public class MainActivity extends AppCompatActivity {
         return NavigationUI.navigateUp(navController, appBarConfiguration)
                 || super.onSupportNavigateUp();
     }
-    private void sendMessage() {
-        // Create a new thread to avoid blocking the UI thread
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                // Get the connected nodes on the Wear network
-                Task<List<Node>> nodeListTask = Wearable.getNodeClient(getApplicationContext()).getConnectedNodes();
-                try {
-                    List<Node> nodes = Tasks.await(nodeListTask);
+private void sendData(String data) {
+    new Thread(new Runnable() {
+        @Override
+        public void run() {
+            String path = "/data";
+            String message = data;
+            byte[] messageData = message.getBytes(StandardCharsets.UTF_8);
+
+            Task<List<Node>> nodeListTask = Wearable.getNodeClient(getApplicationContext()).getConnectedNodes();
+            nodeListTask.addOnSuccessListener(new OnSuccessListener<List<Node>>() {
+                @Override
+                public void onSuccess(List<Node> nodes) {
                     for (Node node : nodes) {
-                        // Build the message
-                        String message = "Hello!";
-                        byte[] payload = message.getBytes();
+                        Task<Integer> sendMessageTask = Wearable.getMessageClient(MainActivity.this)
+                                .sendMessage(node.getId(), path, messageData);
 
-                        // Send the message
-                        Task<Integer> sendMessageTask =
-                                Wearable.getMessageClient(getApplicationContext()).sendMessage(node.getId(), "/message", payload);
-
-                        // Add onCompleteListener to check if the message was successfully sent
-                        sendMessageTask.addOnCompleteListener(new OnCompleteListener<Integer>() {
+                        sendMessageTask.addOnSuccessListener(new OnSuccessListener<Integer>() {
                             @Override
-                            public void onComplete(@NonNull Task<Integer> task) {
-                                if (task.isSuccessful()) {
-                                    int result = task.getResult();
-                                    Log.d("from android", "Message sent to " + node.getDisplayName() + ". Result: " + result + ". message: " +message);
-                                    runOnUiThread(new Runnable() {
-                                        public void run() {
-                                            Toast.makeText(MainActivity.this, "성공", Toast.LENGTH_SHORT).show();
-                                        }
-                                    });
-                                } else {
-                                    Exception exception = task.getException();
-                                    Log.e("from android", "Failed to send message: " + exception);
-                                    runOnUiThread(new Runnable() {
-                                        public void run() {
-                                            Toast.makeText(MainActivity.this, "Toast 메시지 내용", Toast.LENGTH_SHORT).show();
-                                        }
-                                    });
-                                }
+                            public void onSuccess(Integer integer) {
+                                Log.d("from android", "성공적 전송: " + message);
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        Toast.makeText(MainActivity.this, "성공", Toast.LENGTH_SHORT).show();
+                                    }
+                                });
+                            }
+                        });
+
+                        sendMessageTask.addOnFailureListener(new OnFailureListener() {
+                            @Override
+                            public void onFailure(@NonNull Exception exception) {
+                                Log.e("from android", "Failed to send data: " + exception);
+                                runOnUiThread(new Runnable() {
+                                    public void run() {
+                                        Toast.makeText(MainActivity.this, "Toast 메시지 내용", Toast.LENGTH_SHORT).show();
+                                    }
+                                });
                             }
                         });
                     }
-                } catch (ExecutionException exception) {
-                    Log.e("from android", "Failed to send message: " + exception);
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "Toast 메시지 내용", Toast.LENGTH_SHORT).show();
-                        }
-                    });
-                } catch (InterruptedException exception) {
-                    Log.e("from android", "Failed to send message: " + exception);
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                            Toast.makeText(MainActivity.this, "Toast 메시지 내용", Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                }
+            });
+        }
+    }).start();
+}
+    private void checkConnectedNodes() {
+        Task<List<Node>> nodeListTask =
+                Wearable.getNodeClient(this).getConnectedNodes();
+        nodeListTask.addOnSuccessListener(new OnSuccessListener<List<Node>>() {
+            @Override
+            public void onSuccess(List<Node> nodes) {
+                if (nodes != null && !nodes.isEmpty()) {
+                    for (Node node : nodes) {
+                        Log.d("MainActivity", "연결된 노드: " + node.getDisplayName());
+                    }
+                } else {
+                    Log.d("MainActivity", "연결된 노드가 없습니다.");
                 }
             }
-        }).start();
+        });
+        nodeListTask.addOnFailureListener(new OnFailureListener() {
+            @Override
+            public void onFailure(@NonNull Exception exception) {
+                Log.e("MainActivity", "Failed to get connected nodes", exception);
+            }
+        });
     }
 }
 
